@@ -9,9 +9,8 @@
  *      Author: Vincent Simonetti
  */
 
-#include <stdlib.h>
 #include <math.h>
-#include "myo/libmyo.h"
+#include "myo_internal.h"
 
 LIBMYO_EXPORT uint32_t libmyo_event_get_type(libmyo_event_t event)
 {
@@ -47,6 +46,12 @@ LIBMYO_EXPORT libmyo_x_direction_t libmyo_event_get_x_direction(libmyo_event_t e
 {
 	//TODO
 	return libmyo_x_direction_unknown;
+}
+
+LIBMYO_EXPORT float libmyo_event_get_orientation(libmyo_event_t event, libmyo_orientation_index index)
+{
+	//TODO
+	return NAN;
 }
 
 LIBMYO_EXPORT float libmyo_event_get_accelerometer(libmyo_event_t event, unsigned int index)
