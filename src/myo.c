@@ -13,16 +13,21 @@
 #include <string.h>
 #include <errno.h>
 
+#include <pthread.h>
+
 #include <btapi/btdevice.h>
 #include <btapi/btgatt.h>
 #include <btapi/btle.h>
 
-//XXX Should be handled atomically
-static int bt_manager_init = 0;
-static libmyo_cmd_chain_t* commands = NULL;
-static libmyo_cmd_chain_t* last_command = NULL;
+//XXX init and shutdown need some cleanup. They were written to be small, but between locks and state changes, it got pretty ugly quickly
+
+pthread_mutex_t manager_lock = PTHREAD_MUTEX_INITIALIZER; /* PTHREAD_RMUTEX_INITIALIZER for recursive mutexes */
+static int bt_manager_init = 0; /* Could possibly combine with hub_count... */
 static unsigned int hub_count = 0;
 static libmyo_hub_impl_t** hubs = NULL;
+
+static libmyo_cmd_chain_t* commands = NULL;
+static libmyo_cmd_chain_t* last_command = NULL;
 
 bool validate_app_id(const char* app_id, libmyo_error_details_t* out_error)
 {
@@ -138,41 +143,15 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 		}
 	}
 
-	/* Expand hub list */
-	libmyo_hub_impl_t** old_hubs = hubs;
-	hubs = (libmyo_hub_impl_t**)realloc(hubs, sizeof(libmyo_hub_impl_t*) * (hub_count++));
-	if (!hubs)
-	{
-		hub_count--;
-		hubs = old_hubs;
-		if (out_error)
-		{
-			*out_error = libmyo_create_error("Out of memory", libmyo_error_runtime);
-		}
-		return libmyo_error_runtime;
-	}
-
-	/* Setup hub */
-	libmyo_hub_impl_t* hub = malloc(sizeof(libmyo_hub_impl_t));
-	if (!hub)
-	{
-		if (out_error)
-		{
-			*out_error = libmyo_create_error("Out of memory, hub", libmyo_error_runtime);
-		}
-		return libmyo_error_runtime;
-	}
-	*out_hub = hub;
-	hub->app_id = strdup(application_identifier);
-	hub->device_count = 0;
-	hub->devices = NULL;
-	hubs[hub_count - 1] = hub;
+	pthread_mutex_lock(&manager_lock);
 
 	/* Startup device manager */
-	if (bt_manager_init == 0)
+	if (bt_manager_init++ == 0)
 	{
 		if (bt_device_init(myo_bt_callback) != EOK)
 		{
+			bt_manager_init--;
+			pthread_mutex_unlock(&manager_lock);
 			if (out_error)
 			{
 				const char* reason = errno == ENOMEM ? "Out of memory, bluetooth" :
@@ -187,6 +166,8 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 		gatt_callback.updated = NULL;
 		if (bt_gatt_init(&gatt_callback) != EOK)
 		{
+			bt_manager_init--;
+			pthread_mutex_unlock(&manager_lock);
 			bt_device_deinit();
 			if (out_error)
 			{
@@ -199,6 +180,8 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 		}
 		if (bt_le_init(NULL) != EOK)
 		{
+			bt_manager_init--;
+			pthread_mutex_unlock(&manager_lock);
 			bt_gatt_deinit();
 			bt_device_deinit();
 			if (out_error)
@@ -211,7 +194,70 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 			return libmyo_error_runtime;
 		}
 	}
-	bt_manager_init++;
+
+	/* Expand hub list */
+	libmyo_hub_impl_t** old_hubs = hubs;
+	hubs = (libmyo_hub_impl_t**)realloc(hubs, sizeof(libmyo_hub_impl_t*) * (hub_count++));
+	if (!hubs)
+	{
+		if (bt_manager_init == 1)
+		{
+			bt_le_deinit();
+			bt_gatt_deinit();
+			bt_device_deinit();
+			bt_manager_init = 0;
+		}
+		hub_count--;
+		hubs = old_hubs;
+		pthread_mutex_unlock(&manager_lock);
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("Out of memory", libmyo_error_runtime);
+		}
+		return libmyo_error_runtime;
+	}
+
+	/* Setup hub */
+	libmyo_hub_impl_t* hub = malloc(sizeof(libmyo_hub_impl_t));
+	if (!hub)
+	{
+		if (hub_count == 1)
+		{
+			free(hubs);
+			hubs = NULL;
+			hub_count = 0;
+		}
+		else
+		{
+			old_hubs = hubs;
+			hubs = (libmyo_hub_impl_t**)realloc(hubs, sizeof(libmyo_hub_impl_t*) * (hub_count--));
+			if (!hubs)
+			{
+				/* Gesh, we can't get a break can we... */
+				hubs = old_hubs;
+			}
+		}
+		if (bt_manager_init == 1)
+		{
+			bt_le_deinit();
+			bt_gatt_deinit();
+			bt_device_deinit();
+			bt_manager_init = 0;
+		}
+		pthread_mutex_unlock(&manager_lock);
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("Out of memory, hub", libmyo_error_runtime);
+		}
+		return libmyo_error_runtime;
+	}
+	*out_hub = hub;
+	hub->app_id = strdup(application_identifier);
+	hub->device_count = 0;
+	hub->devices = NULL;
+	hubs[hub_count - 1] = hub;
+
+	pthread_mutex_unlock(&manager_lock);
 
 	return libmyo_success;
 }
@@ -227,6 +273,9 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 		}
 		return libmyo_error_invalid_argument;
 	}
+
+	pthread_mutex_lock(&manager_lock);
+
 	libmyo_hub_impl_t* hub_impl = (libmyo_hub_impl_t*)hub;
 	if (bt_manager_init == 0 || hub_count == 0)
 	{
@@ -249,6 +298,7 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 	}
 	if (index < 0)
 	{
+		pthread_mutex_unlock(&manager_lock);
 		if (out_error)
 		{
 			*out_error = libmyo_create_error("Not a valid hub", libmyo_error);
@@ -277,7 +327,7 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 		hubs = (libmyo_hub_impl_t**)realloc(hubs, sizeof(libmyo_hub_impl_t*) * hub_count);
 		if (!hubs)
 		{
-			// We can ignore the realloc. It will just be freed or resized another time.
+			/* We can ignore the realloc. It will just be freed or resized another time. */
 			hubs = old_hubs;
 		}
 	}
@@ -302,8 +352,11 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 
 		/* Cleanup commands */
 		libmyo_cmd_chain_t* chain = commands;
-		commands = NULL;
-		last_command = NULL;
+		while (!__sync_bool_compare_and_swap(&commands, chain, NULL))
+		{
+			chain = commands;
+		}
+		__sync_bool_compare_and_swap(&last_command, last_command, NULL);
 		while (chain)
 		{
 			libmyo_cmd_chain_t* cmd = chain;
@@ -314,6 +367,8 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 		}
 	}
 	bt_manager_init--;
+
+	pthread_mutex_unlock(&manager_lock);
 
 	return libmyo_success;
 }
