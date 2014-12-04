@@ -19,6 +19,8 @@
 #include <btapi/btgatt.h>
 #include <btapi/btle.h>
 
+#include <bbndk.h>
+
 //XXX init and shutdown need some cleanup. They were written to be small, but between locks and state changes, it got pretty ugly quickly
 
 pthread_mutex_t manager_lock = PTHREAD_MUTEX_INITIALIZER; /* PTHREAD_RMUTEX_INITIALIZER for recursive mutexes */
@@ -193,6 +195,12 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 			}
 			return libmyo_error_runtime;
 		}
+
+#if BBNDK_VERSION_AT_LEAST(10,3,0)
+		//XXX 10.3.1 Gold needs this, but we'll enable it anyway as a precaution
+		//https://twitter.com/ekkescorner/status/535774701856256000
+		bt_ldev_set_filters(BT_EVT_ALL_EVENT, true);
+#endif
 	}
 
 	/* Expand hub list */
@@ -373,6 +381,106 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 	return libmyo_success;
 }
 
+LIBMYO_EXPORT libmyo_result_t libmyo_set_locking_policy(libmyo_hub_t hub, libmyo_locking_policy_t locking_policy, libmyo_error_details_t* out_error)
+{
+	//TODO
+	return libmyo_success;
+}
+
+//bool firstRun = true;
+LIBMYO_EXPORT libmyo_result_t libmyo_run(libmyo_hub_t hub, unsigned int duration_ms, libmyo_handler_t handler, void* user_data, libmyo_error_details_t* out_error)
+{
+	//TODO
+	return libmyo_success;
+	/* Testing
+	if(firstRun)
+	{
+		firstRun = false;
+		bt_remote_device_t *next_remote_device = 0;
+		bt_remote_device_t **remote_device_array = bt_disc_retrieve_devices(BT_DISCOVERY_PREKNOWN, 0);
+		if (remote_device_array) {
+		    for (int i = 0; (next_remote_device = remote_device_array[i]); ++i) {
+		        char device_name[128];
+		        char device_addr[128];
+		        int device_class = -1;
+		        int device_type = -1;
+		        bool encrypted = false;
+		        bool paired = false;
+		        const int bufferSize = sizeof(device_name);
+
+		        // Get the friendly name of the remote device. The
+		        // friendly name is a string value that makes it easy
+		        // to identify the device.
+		        if (bt_rdev_get_friendly_name(next_remote_device, device_name, bufferSize) != 0) {
+		            // handle error
+		        	//TODO
+		        }
+		        // Retrieve the MAC address of the remote device.
+		        if (bt_rdev_get_address(next_remote_device, device_addr) != 0) {
+		            // handle error
+		        	//TODO
+		        }
+		        // Retrieve the Class of Device value of the
+		        // remote device.
+		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_DEVICECLASS);
+		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_MAJORSERVICECLASS);
+		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_MAJORDEVICECLASS);
+		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_MINORDEVICECLASS);
+
+		        // Retrieve the remote device type.
+				device_type = bt_rdev_get_type(next_remote_device);
+
+				if (bt_rdev_is_encrypted(next_remote_device)) {
+					encrypted = true;
+				}
+
+				// Determine if the device is paired.
+				if (bt_rdev_is_paired(next_remote_device, &paired) != 0) {
+					// Handle error
+					//TODO
+				}
+
+				// Retrieve services
+				char **services_array = bt_rdev_get_services(next_remote_device);
+				if (services_array != NULL) {
+					// Work with retrieved services
+					//TODO
+
+					// Free the resources used for the services array.
+					bt_rdev_free_services(services_array);
+				}
+
+				// If the remote device is a low-energy device,
+				// retrieve low-energy services.
+				if (device_type == BT_DEVICE_TYPE_LE_PUBLIC || device_type == BT_DEVICE_TYPE_LE_PRIVATE) {
+
+					services_array = bt_rdev_get_services_gatt(next_remote_device);
+					if (services_array != NULL) {
+						// Work with retrieved services
+						const char* service = NULL;
+						int k;
+						for (k = 0; (service = services_array[k]); ++k) {
+							//TODO
+							if(service[0] != '0')
+							{
+								//TODO
+								k = k + 1;
+								k = k - 1;
+							}
+						}
+
+						// Free the resources used for the services array.
+						bt_rdev_free_services(services_array);
+					}
+				}
+		    }
+		    bt_rdev_free_array(remote_device_array);
+		}
+	}
+	return libmyo_success;
+	*/
+}
+
 LIBMYO_EXPORT libmyo_result_t libmyo_vibrate(libmyo_myo_t myo, libmyo_vibration_type_t type, libmyo_error_details_t* out_error)
 {
 	//TODO
@@ -385,7 +493,19 @@ LIBMYO_EXPORT libmyo_result_t libmyo_request_rssi(libmyo_myo_t myo, libmyo_error
 	return libmyo_success;
 }
 
-LIBMYO_EXPORT libmyo_result_t libmyo_run(libmyo_hub_t hub, unsigned int duration_ms, libmyo_handler_t handler, void* user_data, libmyo_error_details_t* out_error)
+LIBMYO_EXPORT libmyo_result_t libmyo_myo_unlock(libmyo_myo_t myo, libmyo_unlock_type_t type, libmyo_error_details_t* out_error)
+{
+	//TODO
+	return libmyo_success;
+}
+
+LIBMYO_EXPORT libmyo_result_t libmyo_myo_lock(libmyo_myo_t myo, libmyo_error_details_t* out_error)
+{
+	//TODO
+	return libmyo_success;
+}
+
+LIBMYO_EXPORT libmyo_result_t libmyo_myo_notify_user_action(libmyo_myo_t myo, libmyo_user_action_type_t type, libmyo_error_details_t* out_error)
 {
 	//TODO
 	return libmyo_success;
