@@ -80,6 +80,23 @@ bool validate_app_id(const char* app_id, libmyo_error_details_t* out_error)
 	return error == NULL;
 }
 
+bool validate_hub(libmyo_hub_impl_t* hub)
+{
+	if (bt_manager_init == 0 || hub_count == 0)
+	{
+		return false;
+	}
+	//XXX Actually validate somehow?
+	return true;
+}
+
+void free_myo(libmyo_myo_impl_t* myo)
+{
+	myo->hub = NULL;
+	//TODO
+	free(myo);
+}
+
 void myo_bt_callback(const int event, const char *bt_addr, const char *event_data)
 {
 	switch (event)
@@ -263,6 +280,9 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 	hub->app_id = strdup(application_identifier);
 	hub->device_count = 0;
 	hub->devices = NULL;
+	hub->myo_count = 0;
+	hub->myos = NULL;
+	hub->locking_policy = libmyo_locking_policy_standard; //XXX Is this correct?
 	hubs[hub_count - 1] = hub;
 
 	pthread_mutex_unlock(&manager_lock);
@@ -285,7 +305,7 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 	pthread_mutex_lock(&manager_lock);
 
 	libmyo_hub_impl_t* hub_impl = (libmyo_hub_impl_t*)hub;
-	if (bt_manager_init == 0 || hub_count == 0)
+	if (validate_hub(hub_impl))
 	{
 		if (out_error)
 		{
@@ -343,6 +363,12 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 	/* Cleanup hub */
 	while (hub_impl->device_count--)
 	{
+		free_myo(hub_impl->myos[hub_impl->myo_count - 1]);
+	}
+	free(hub_impl->myos);
+	hub_impl->myos = NULL;
+	while (hub_impl->device_count--)
+	{
 		free((void*)hub_impl->devices[hub_impl->device_count - 1]);
 	}
 	free(hub_impl->devices);
@@ -383,7 +409,38 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 
 LIBMYO_EXPORT libmyo_result_t libmyo_set_locking_policy(libmyo_hub_t hub, libmyo_locking_policy_t locking_policy, libmyo_error_details_t* out_error)
 {
-	//TODO
+	if (!hub)
+	{
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("hub is NULL", libmyo_error_invalid_argument);
+		}
+		return libmyo_error_invalid_argument;
+	}
+	libmyo_hub_impl_t* hub_impl = (libmyo_hub_impl_t*)hub;
+	if (!validate_hub(hub_impl))
+	{
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("Not a valid hub", libmyo_error);
+		}
+		return libmyo_error;
+	}
+	hub_impl->locking_policy = locking_policy;
+	return libmyo_success;
+}
+
+LIBMYO_EXPORT libmyo_result_t libmyo_set_stream_emg(libmyo_myo_t myo, libmyo_stream_emg_t emg, libmyo_error_details_t* out_error)
+{
+	if (!myo)
+	{
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("myo is NULL", libmyo_error_invalid_argument);
+		}
+		return libmyo_error_invalid_argument;
+	}
+	((libmyo_myo_impl_t*)myo)->emg_setting = emg;
 	return libmyo_success;
 }
 

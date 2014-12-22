@@ -77,3 +77,9 @@ LIBMYO_EXPORT int8_t libmyo_event_get_rssi(libmyo_event_t event)
 	//TODO
 	return 0;
 }
+
+LIBMYO_EXPORT int8_t libmyo_event_get_emg(libmyo_event_t event, unsigned int sensor)
+{
+	//TODO
+	return 0;
+}

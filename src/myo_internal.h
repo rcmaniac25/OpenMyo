@@ -12,6 +12,7 @@
 #define MYO_INTERNAL_H_
 
 #include <stdlib.h>
+#include <stdbool.h>
 #include <time.h>
 #include "myo/libmyo.h"
 
@@ -28,8 +29,18 @@ typedef struct libmyo_hub_impl_s
 	const char* app_id;
 	unsigned int device_count;
 	const char** devices;
+	unsigned int myo_count;
+	struct libmyo_myo_impl_s** myos;
+	libmyo_locking_policy_t locking_policy;
 	//TODO
 } libmyo_hub_impl_t;
+
+typedef struct libmyo_myo_impl_s
+{
+	libmyo_hub_impl_t* hub;
+	libmyo_stream_emg_t emg_setting;
+	//TODO
+} libmyo_myo_impl_t;
 
 typedef struct libmyo_cmd_s
 {
@@ -46,5 +57,6 @@ typedef struct libmyo_cmd_chain_s
 } libmyo_cmd_chain_t;
 
 libmyo_error_details_t libmyo_create_error(const char* error, libmyo_result_t error_kind);
+bool validate_hub(libmyo_hub_impl_t* hub);
 
 #endif /* MYO_INTERNAL_H_ */
