@@ -1,12 +1,12 @@
 /*
- * error.c
- *
  * Copyright (C) 2013-2014 Thalmic Labs Inc.
- * Developed under violation of the Myo SDK license agreement. See LICENSE.txt for details.
- * AKA, use at your own risk.
+ * Copyright (C) 2014 Vincent Simonetti
  *
- *  Created on: Oct 20, 2014
- *      Author: Vincent Simonetti
+ * See LICENSE for details.
+ *
+ * Built without violation of the Myo SDK license agreement. See the Myo SDK's LICENSE.txt for details.
+ *
+ * Created on: Oct 20, 2014
  */
 
 #include "myo_internal.h"

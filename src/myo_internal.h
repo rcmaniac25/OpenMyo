@@ -1,12 +1,12 @@
 /*
- * myo_internal.h
- *
  * Copyright (C) 2013-2014 Thalmic Labs Inc.
- * Developed under violation of the Myo SDK license agreement. See LICENSE.txt for details.
- * AKA, use at your own risk.
+ * Copyright (C) 2014 Vincent Simonetti
  *
- *  Created on: Oct 25, 2014
- *      Author: Vincent Simonetti
+ * See LICENSE for details.
+ *
+ * Built without violation of the Myo SDK license agreement. See the Myo SDK's LICENSE.txt for details.
+ *
+ * Created on: Oct 25, 2014
  */
 #ifndef MYO_INTERNAL_H_
 #define MYO_INTERNAL_H_
@@ -27,8 +27,6 @@ typedef enum
 typedef struct libmyo_hub_impl_s
 {
 	const char* app_id;
-	unsigned int device_count;
-	const char** devices;
 	unsigned int myo_count;
 	struct libmyo_myo_impl_s** myos;
 	libmyo_locking_policy_t locking_policy;
@@ -38,9 +36,18 @@ typedef struct libmyo_hub_impl_s
 typedef struct libmyo_myo_impl_s
 {
 	libmyo_hub_impl_t* hub;
+	const char* device;
 	libmyo_stream_emg_t emg_setting;
 	//TODO
 } libmyo_myo_impl_t;
+
+typedef struct libmyo_event_impl_s
+{
+	libmyo_event_type_t type;
+	uint64_t timestamp;
+	libmyo_myo_impl_t* myo;
+	//TODO
+} libmyo_event_impl_t;
 
 typedef struct libmyo_cmd_s
 {
@@ -58,5 +65,6 @@ typedef struct libmyo_cmd_chain_s
 
 libmyo_error_details_t libmyo_create_error(const char* error, libmyo_result_t error_kind);
 bool validate_hub(libmyo_hub_impl_t* hub);
+double get_time();
 
 #endif /* MYO_INTERNAL_H_ */

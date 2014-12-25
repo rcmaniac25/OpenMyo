@@ -1,12 +1,12 @@
 /*
- * event.c
- *
  * Copyright (C) 2013-2014 Thalmic Labs Inc.
- * Developed under violation of the Myo SDK license agreement. See LICENSE.txt for details.
- * AKA, use at your own risk.
+ * Copyright (C) 2014 Vincent Simonetti
  *
- *  Created on: Oct 20, 2014
- *      Author: Vincent Simonetti
+ * See LICENSE for details.
+ *
+ * Built without violation of the Myo SDK license agreement. See the Myo SDK's LICENSE.txt for details.
+ *
+ * Created on: Oct 20, 2014
  */
 
 #include <math.h>
@@ -14,19 +14,25 @@
 
 LIBMYO_EXPORT uint32_t libmyo_event_get_type(libmyo_event_t event)
 {
-	//TODO
-	return 0;
+	/* Just let it segfault if event is null/invalid because we have no way to return 0 anyway (it's the paired event) */
+	return ((libmyo_event_impl_t*)event)->type;
 }
 
 LIBMYO_EXPORT uint64_t libmyo_event_get_timestamp(libmyo_event_t event)
 {
-	//TODO
+	if (event)
+	{
+		return ((libmyo_event_impl_t*)event)->timestamp;
+	}
 	return 0ULL;
 }
 
 LIBMYO_EXPORT libmyo_myo_t libmyo_event_get_myo(libmyo_event_t event)
 {
-	//TODO
+	if (event)
+	{
+		return ((libmyo_event_impl_t*)event)->myo;
+	}
 	return NULL;
 }
 

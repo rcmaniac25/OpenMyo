@@ -1,12 +1,12 @@
 /*
- * myo.c
- *
  * Copyright (C) 2013-2014 Thalmic Labs Inc.
- * Developed under violation of the Myo SDK license agreement. See LICENSE.txt for details.
- * AKA, use at your own risk.
+ * Copyright (C) 2014 Vincent Simonetti
  *
- *  Created on: Oct 20, 2014
- *      Author: Vincent Simonetti
+ * See LICENSE for details.
+ *
+ * Built without violation of the Myo SDK license agreement. See the Myo SDK's LICENSE.txt for details.
+ *
+ * Created on: Oct 20, 2014
  */
 
 #include "myo_internal.h"
@@ -14,6 +14,7 @@
 #include <errno.h>
 
 #include <pthread.h>
+#include <time.h>
 
 #include <btapi/btdevice.h>
 #include <btapi/btgatt.h>
@@ -21,20 +22,34 @@
 
 #include <bbndk.h>
 
+#define SERVICE_0 "0xD5060001-A904-DEB9-4748-2C7F4A124842"
+#define SERVICE_1 "0xD5060002-A904-DEB9-4748-2C7F4A124842"
+#define SERVICE_2 "0xD5060003-A904-DEB9-4748-2C7F4A124842"
+#define SERVICE_3 "0xD5060004-A904-DEB9-4748-2C7F4A124842"
+#define SERVICE_4 "0xD5060005-A904-DEB9-4748-2C7F4A124842"
+#define SERVICE_5 "0xD5060006-A904-DEB9-4748-2C7F4A124842"
+#define SERVICE_6 "0x4248124A-7F2C-4847-B9DE-04A9010006D5"
+
+#define SET_SERVICE_FLAG(flags,ind) ((flags) |= (1 << (ind)))
+#define IS_SERVICE_FLAG_SET(flags,ind) (((flags) & (1 << (ind))) != 0)
+#define HAS_ALL_SERVICE_FLAGS(flags) ((flags) == 0x7F)
+
 //XXX init and shutdown need some cleanup. They were written to be small, but between locks and state changes, it got pretty ugly quickly
 
 pthread_mutex_t manager_lock = PTHREAD_MUTEX_INITIALIZER; /* PTHREAD_RMUTEX_INITIALIZER for recursive mutexes */
 static int bt_manager_init = 0; /* Could possibly combine with hub_count... */
 static unsigned int hub_count = 0;
 static libmyo_hub_impl_t** hubs = NULL;
+static bool has_checked_devices = false;
 
+pthread_mutex_t cmd_lock = PTHREAD_MUTEX_INITIALIZER;
 static libmyo_cmd_chain_t* commands = NULL;
 static libmyo_cmd_chain_t* last_command = NULL;
 
 bool validate_app_id(const char* app_id, libmyo_error_details_t* out_error)
 {
 	const char* error = NULL;
-	int section_count = 0;
+	int seperator_count = 0;
 
 	unsigned int len = strlen(app_id);
 	for (unsigned int i = 0; i < len && !error; i++)
@@ -45,7 +60,7 @@ bool validate_app_id(const char* app_id, libmyo_error_details_t* out_error)
 			if (i > 0 && app_id[i - 1] != '.' &&
 					(i + 1) < len && app_id[i + 1] != '.')
 			{
-				section_count++;
+				seperator_count++;
 			}
 		}
 		else
@@ -53,7 +68,7 @@ bool validate_app_id(const char* app_id, libmyo_error_details_t* out_error)
 			char c = app_id[i];
 			if (c == '-' || c == '_')
 			{
-				if (section_count < 1)
+				if (seperator_count < 1)
 				{
 					error = "Hyphen (-) and underscore (_) are not allowed in the top-level domain of the application identifier.";
 				}
@@ -69,7 +84,7 @@ bool validate_app_id(const char* app_id, libmyo_error_details_t* out_error)
 			}
 		}
 	}
-	if (!error && section_count < 3)
+	if (!error && seperator_count < 2)
 	{
 		error = "Not enough sections to be considered a valid application identifier";
 	}
@@ -90,11 +105,35 @@ bool validate_hub(libmyo_hub_impl_t* hub)
 	return true;
 }
 
+libmyo_myo_impl_t* create_myo(const char* device, libmyo_hub_impl_t* hub)
+{
+	libmyo_myo_impl_t* myo = (libmyo_myo_impl_t*)malloc(sizeof(libmyo_myo_impl_t));
+	if (myo)
+	{
+		myo->hub = hub;
+		myo->device = strdup(device);
+		myo->emg_setting = libmyo_stream_emg_disabled;
+		//TODO
+	}
+	return myo;
+}
+
 void free_myo(libmyo_myo_impl_t* myo)
 {
 	myo->hub = NULL;
+	free((void*)myo->device);
+	myo->device = NULL;
 	//TODO
 	free(myo);
+}
+
+//TODO: create event
+
+double get_time()
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (1000.0 * ts.tv_sec) + (0.000001 * ts.tv_nsec);
 }
 
 void myo_bt_callback(const int event, const char *bt_addr, const char *event_data)
@@ -106,7 +145,7 @@ void myo_bt_callback(const int event, const char *bt_addr, const char *event_dat
 	case BT_EVT_DEVICE_ADDED:
 	case BT_EVT_LE_DEVICE_CONNECTED:
 	case BT_EVT_LE_NAME_UPDATED:
-	case BT_EVT_PAIRING_STARTED:
+	case BT_EVT_PAIRING_STARTED: //XXX don't do anything with new devices until has_checked_devices is true, after that it register new commands for new devices
 	case BT_EVT_PAIRING_COMPLETE:
 	case BT_EVT_DEVICE_DELETED:
 	case BT_EVT_LE_DEVICE_DISCONNECTED:
@@ -278,8 +317,6 @@ LIBMYO_EXPORT libmyo_result_t libmyo_init_hub(libmyo_hub_t* out_hub, const char*
 	}
 	*out_hub = hub;
 	hub->app_id = strdup(application_identifier);
-	hub->device_count = 0;
-	hub->devices = NULL;
 	hub->myo_count = 0;
 	hub->myos = NULL;
 	hub->locking_policy = libmyo_locking_policy_standard; //XXX Is this correct?
@@ -361,18 +398,12 @@ LIBMYO_EXPORT libmyo_result_t libmyo_shutdown_hub(libmyo_hub_t hub, libmyo_error
 	}
 
 	/* Cleanup hub */
-	while (hub_impl->device_count--)
+	while (hub_impl->myo_count--)
 	{
 		free_myo(hub_impl->myos[hub_impl->myo_count - 1]);
 	}
 	free(hub_impl->myos);
 	hub_impl->myos = NULL;
-	while (hub_impl->device_count--)
-	{
-		free((void*)hub_impl->devices[hub_impl->device_count - 1]);
-	}
-	free(hub_impl->devices);
-	hub_impl->devices = NULL;
 	free((void*)hub_impl->app_id);
 	hub_impl->app_id = NULL;
 	free(hub_impl);
@@ -444,98 +475,128 @@ LIBMYO_EXPORT libmyo_result_t libmyo_set_stream_emg(libmyo_myo_t myo, libmyo_str
 	return libmyo_success;
 }
 
-//bool firstRun = true;
 LIBMYO_EXPORT libmyo_result_t libmyo_run(libmyo_hub_t hub, unsigned int duration_ms, libmyo_handler_t handler, void* user_data, libmyo_error_details_t* out_error)
 {
-	//TODO
-	return libmyo_success;
-	/* Testing
-	if(firstRun)
+	if (!hub)
 	{
-		firstRun = false;
-		bt_remote_device_t *next_remote_device = 0;
-		bt_remote_device_t **remote_device_array = bt_disc_retrieve_devices(BT_DISCOVERY_PREKNOWN, 0);
-		if (remote_device_array) {
-		    for (int i = 0; (next_remote_device = remote_device_array[i]); ++i) {
-		        char device_name[128];
-		        char device_addr[128];
-		        int device_class = -1;
-		        int device_type = -1;
-		        bool encrypted = false;
-		        bool paired = false;
-		        const int bufferSize = sizeof(device_name);
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("hub is NULL", libmyo_error_invalid_argument);
+		}
+		return libmyo_error_invalid_argument;
+	}
+	if (!handler)
+	{
+		if (out_error)
+		{
+			*out_error = libmyo_create_error("handler is NULL", libmyo_error_invalid_argument);
+		}
+		return libmyo_error_invalid_argument;
+	}
+	libmyo_hub_impl_t* hub_impl = (libmyo_hub_impl_t*)hub;
+	double start_time = get_time();
 
-		        // Get the friendly name of the remote device. The
-		        // friendly name is a string value that makes it easy
-		        // to identify the device.
-		        if (bt_rdev_get_friendly_name(next_remote_device, device_name, bufferSize) != 0) {
-		            // handle error
-		        	//TODO
-		        }
-		        // Retrieve the MAC address of the remote device.
-		        if (bt_rdev_get_address(next_remote_device, device_addr) != 0) {
-		            // handle error
-		        	//TODO
-		        }
-		        // Retrieve the Class of Device value of the
-		        // remote device.
-		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_DEVICECLASS);
-		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_MAJORSERVICECLASS);
-		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_MAJORDEVICECLASS);
-		        device_class = bt_rdev_get_device_class(next_remote_device, BT_COD_MINORDEVICECLASS);
-
-		        // Retrieve the remote device type.
-				device_type = bt_rdev_get_type(next_remote_device);
-
-				if (bt_rdev_is_encrypted(next_remote_device)) {
-					encrypted = true;
+	if (__sync_bool_compare_and_swap(&has_checked_devices, false, true))
+	{
+		/* Check for devices */
+		bt_remote_device_t* next_remote_device = NULL;
+		bt_remote_device_t** remote_device_array = bt_disc_retrieve_devices(BT_DISCOVERY_PREKNOWN, 0);
+		if (remote_device_array)
+		{
+			for (int i = 0; (next_remote_device = remote_device_array[i]); ++i)
+			{
+				if ((get_time() - start_time) > duration_ms)
+				{
+					break;
+				}
+				/* Simple tests to check that it's a Myo */
+				if (bt_rdev_get_device_class(next_remote_device, BT_COD_DEVICECLASS) != 0 ||
+					bt_rdev_get_device_class(next_remote_device, BT_COD_MAJORSERVICECLASS) != 0 ||
+					bt_rdev_get_device_class(next_remote_device, BT_COD_MAJORDEVICECLASS) != 0 ||
+					bt_rdev_get_device_class(next_remote_device, BT_COD_MINORDEVICECLASS) != 0 ||
+					bt_rdev_get_type(next_remote_device) != BT_DEVICE_TYPE_LE_PUBLIC ||
+					bt_rdev_is_encrypted(next_remote_device))
+				{
+					continue;
 				}
 
-				// Determine if the device is paired.
-				if (bt_rdev_is_paired(next_remote_device, &paired) != 0) {
-					// Handle error
-					//TODO
-				}
-
-				// Retrieve services
+				/* Iterative check for Myo */
 				char **services_array = bt_rdev_get_services(next_remote_device);
-				if (services_array != NULL) {
-					// Work with retrieved services
-					//TODO
-
-					// Free the resources used for the services array.
+				if (services_array != NULL)
+				{
 					bt_rdev_free_services(services_array);
+					continue;
 				}
-
-				// If the remote device is a low-energy device,
-				// retrieve low-energy services.
-				if (device_type == BT_DEVICE_TYPE_LE_PUBLIC || device_type == BT_DEVICE_TYPE_LE_PRIVATE) {
-
-					services_array = bt_rdev_get_services_gatt(next_remote_device);
-					if (services_array != NULL) {
-						// Work with retrieved services
-						const char* service = NULL;
-						int k;
-						for (k = 0; (service = services_array[k]); ++k) {
-							//TODO
-							if(service[0] != '0')
-							{
-								//TODO
-								k = k + 1;
-								k = k - 1;
-							}
+				services_array = bt_rdev_get_services_gatt(next_remote_device);
+				if (services_array != NULL)
+				{
+					const char* service = NULL;
+					int service_flags = 0;
+					for (int k = 0; !HAS_ALL_SERVICE_FLAGS(service_flags) && (service = services_array[k]); ++k)
+					{
+						/* This is just ripe for copy-paste errors... */
+						if (!IS_SERVICE_FLAG_SET(service_flags, 0) && strcmp(service, SERVICE_0) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 0);
 						}
+						else if (!IS_SERVICE_FLAG_SET(service_flags, 1) && strcmp(service, SERVICE_1) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 1);
+						}
+						else if (!IS_SERVICE_FLAG_SET(service_flags, 2) && strcmp(service, SERVICE_2) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 2);
+						}
+						else if (!IS_SERVICE_FLAG_SET(service_flags, 3) && strcmp(service, SERVICE_3) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 3);
+						}
+						else if (!IS_SERVICE_FLAG_SET(service_flags, 4) && strcmp(service, SERVICE_4) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 4);
+						}
+						else if (!IS_SERVICE_FLAG_SET(service_flags, 5) && strcmp(service, SERVICE_5) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 5);
+						}
+						else if (!IS_SERVICE_FLAG_SET(service_flags, 6) && strcmp(service, SERVICE_6) == 0)
+						{
+							SET_SERVICE_FLAG(service_flags, 6);
+						}
+					}
+					bt_rdev_free_services(services_array);
 
-						// Free the resources used for the services array.
-						bt_rdev_free_services(services_array);
+					if (HAS_ALL_SERVICE_FLAGS(service_flags))
+					{
+						char device_addr[128];
+						if (bt_rdev_get_address(next_remote_device, device_addr) != 0)
+						{
+							/* Just ignore it */
+							continue;
+						}
+						libmyo_myo_impl_t* myo_impl = create_myo(device_addr, hub_impl);
+						if (myo_impl)
+						{
+							//TODO: create a new "paired" event, need to get firmware version
+							//XXX: what do we do if they want to stop events? Can't reset has_checked_devices, so maybe create but mark as no-event-sent
+							free_myo(myo_impl); //XXX
+						}
 					}
 				}
-		    }
-		    bt_rdev_free_array(remote_device_array);
+			}
+			bt_rdev_free_array(remote_device_array);
+			if ((get_time() - start_time) > duration_ms)
+			{
+				/* Ran out of time */
+				return libmyo_success;
+			}
 		}
+		//XXX sleep for a period of time to let bluetooth events kick in?
 	}
+
+	//TODO: commands
+
 	return libmyo_success;
-	*/
 }
 
 LIBMYO_EXPORT libmyo_result_t libmyo_vibrate(libmyo_myo_t myo, libmyo_vibration_type_t type, libmyo_error_details_t* out_error)
