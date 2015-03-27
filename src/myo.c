@@ -1,10 +1,8 @@
 /*
- * Copyright (C) 2013-2014 Thalmic Labs Inc.
- * Copyright (C) 2014 Vincent Simonetti
+ * Copyright (C) 2013-2015 Thalmic Labs Inc.
+ * Copyright (C) 2014-2015 Vincent Simonetti
  *
  * See LICENSE for details.
- *
- * Built without violation of the Myo SDK license agreement. See the Myo SDK's LICENSE.txt for details.
  *
  * Created on: Oct 20, 2014
  */
@@ -15,6 +13,7 @@
 
 #include <pthread.h>
 #include <time.h>
+#include <math.h>
 
 #include <btapi/btdevice.h>
 #include <btapi/btgatt.h>
@@ -127,7 +126,25 @@ void free_myo(libmyo_myo_impl_t* myo)
 	free(myo);
 }
 
-//TODO: create event
+libmyo_event_impl_t* create_event(libmyo_event_type_t type, libmyo_myo_impl_t* myo)
+{
+	libmyo_event_impl_t* evt = (libmyo_event_impl_t*)malloc(sizeof(libmyo_event_impl_t));
+	if (evt)
+	{
+		evt->type = type;
+		evt->timestamp = (uint64_t)floor(get_time());
+		evt->myo = myo;
+		//TODO
+	}
+	return evt;
+}
+
+void free_event(libmyo_event_impl_t* evt)
+{
+	evt->myo = NULL;
+	//TODO
+	free(evt);
+}
 
 double get_time()
 {

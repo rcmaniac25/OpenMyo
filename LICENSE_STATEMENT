@@ -1,0 +1,13 @@
+# Repo history: Statememt about License
+
+While originally under development, the code files had the header:
+```
+ Copyright (C) 2013-2014 Thalmic Labs Inc.
+Developed under violation of the Myo SDK license agreement. See LICENSE.txt for details.
+AKA, use at your own risk.
+
+Created on: <date>
+     Author: Vincent Simonetti
+```
+
+I just want to say, it was written as a joke. At no point in time was the Myo SDK license agreemment violated. I'd also like to say at no point in time was there a LICENSE.txt, since it's existance, it was always LICENSE. I just want to state that in-case someone looks at the source history and goes "wait a second...". Lastly, this is in a seperate file to prevent scaring people with "Oh no! They have to explain the license, so it may be bad. Let's not use it", and because it takes away from the library description itself.

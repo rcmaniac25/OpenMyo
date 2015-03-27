@@ -1,10 +1,8 @@
 /*
- * Copyright (C) 2013-2014 Thalmic Labs Inc.
- * Copyright (C) 2014 Vincent Simonetti
+ * Copyright (C) 2013-2015 Thalmic Labs Inc.
+ * Copyright (C) 2014-2015 Vincent Simonetti
  *
  * See LICENSE for details.
- *
- * Built without violation of the Myo SDK license agreement. See the Myo SDK's LICENSE.txt for details.
  *
  * Created on: Oct 20, 2014
  */
